@@ -40,7 +40,7 @@ def evaluateARIMAModel(trainSet, testSet, ARIMAOrder):
 
     return meanSquaredError, fittedModel
 
-# https://www.youtube.com/watch?v=aZmYr71YiWQ
+#  https://www.youtube.com/watch?v=aZmYr71YiWQ
 
 results = []
 for p, d, q in product(p,d,q):
