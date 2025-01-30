@@ -8,7 +8,9 @@ from sklearn.metrics import mean_squared_error
 from statsmodels.tsa.arima.model import ARIMA
 from itertools import product
 
-input_csv = "btcusd_1-min_data.csv"
+# NOTE!! get rid of warnings theyre annoying but remove the removal later
+
+input_csv = "btcusd_1-min_data.csv" # dont do this - fetch it from online (kagglehub) - check AI getter
 
                              # y    m  d  h   m   s
 startDate = datetime.datetime(2023, 1, 1, 00, 00, 00) # inclusive
@@ -67,6 +69,9 @@ for p, d, q in product(p,d,q):
             bestMSE = meanSquaredError
 
 print(bestMSE)
+
+# 109445837.08396368
+# 109445837
 
 #plt.plot(timeSlice["Datetime"][:len(trainingDataSlice)], trainingDataSlice["Close"])
 #plt.plot(timeSlice["Datetime"][int(len(timeSlice)*0.8):], testDataSlice["Close"])
