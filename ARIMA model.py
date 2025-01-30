@@ -44,6 +44,8 @@ def evaluateARIMAModel(trainSet, testSet, ARIMAOrder):
 
 #  https://www.youtube.com/watch?v=aZmYr71YiWQ
 
+bestMSE = 999999999999999999  # !!!*** make this inf wtf?
+
 results = []
 for p, d, q in product(p,d,q):
     ARIMAOrder = (p,d,q)
@@ -52,7 +54,7 @@ for p, d, q in product(p,d,q):
 
     results.append((ARIMAOrder, meanSquaredError, fittedModel))
 
-    bestMSE = 999999999999999999
+
 
     if fittedModel: # there are many reasons why a set of parameters will just return None
         #plt.figure()
