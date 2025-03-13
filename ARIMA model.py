@@ -1,80 +1,160 @@
 import csv
 import datetime as datetime
 import time
+import kagglehub
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import mean_squared_error
-from statsmodels.tsa.arima.model import ARIMA
 from itertools import product
+from sklearn.metrics import mean_squared_error
 
-# NOTE!! get rid of warnings theyre annoying but remove the removal later
-
-input_csv = "btcusd_1-min_data.csv" # dont do this - fetch it from online (kagglehub) - check AI getter
+# below recyled from Coin Price Predictor - this just gets the median close price per day between the two dates given
 
                              # y    m  d  h   m   s
-startDate = datetime.datetime(2023, 1, 1, 00, 00, 00) # inclusive
-endDate   = datetime.datetime(2024, 1, 1, 00, 00, 00) # exclusive
+startDate = datetime.datetime(1999, 1, 1, 00, 00, 00) # inclusive
+#endDate   = datetime.datetime(2021, 1, 1, 00, 00, 00) # exclusive
+endDate = datetime.datetime.now()
 
-startDate = time.mktime(startDate.timetuple()) # turn them into unix
-endDate = time.mktime(endDate.timetuple())
+startDateUnix = time.mktime(startDate.timetuple()) # turn them into unix
+endDateUnix = time.mktime(endDate.timetuple())
 
-csvData = pd.read_csv(input_csv, header = 0)
+# download latest version of the data set
+path = kagglehub.dataset_download("mczielinski/bitcoin-historical-data")
+
+print("Path to dataset files:", path)
+
+csvData = pd.read_csv(path + "\\btcusd_1-min_data.csv", header = 0)
 
 csvData["Datetime"] = pd.to_datetime(csvData["Timestamp"], unit = "s")
 
-timeSlice = csvData[(csvData["Timestamp"] >= startDate) & (csvData["Timestamp"] < endDate)]
+timeSlice = csvData[(csvData["Timestamp"] >= startDateUnix) & (csvData["Timestamp"] < endDateUnix)]
 
-trainingDataSlice = timeSlice[:int(len(timeSlice)*0.8)]
-testDataSlice = timeSlice[int(len(timeSlice)*0.8):]
+timeSlice = timeSlice.copy()
+timeSlice.loc[:, "Date"] = timeSlice["Datetime"].dt.date
 
-# define ARIMA parameters - we will need to find the most efficient parameters to pass in
-# the higher these numbers the longer trainging will take as we check every possible set of parameters
-p = range(0,4)      # autoregressive order - number of previous values used to predict the current value - find using partial autocorrelation function (PACF)
-d = range(0,2)      # differencing order - number of times the data is "differenced" (removing trends / seasonality) - this can be explored more in SARIMA
-q = range(0,4)      # Moving average order - number of past foecast errors included in the model. Found using autocorrelation function (ACF)
+dataGroup = timeSlice.groupby("Date")
+closePriceGroup = dataGroup["Close"]
 
-def evaluateARIMAModel(trainSet, testSet, ARIMAOrder):
-    model = ARIMA(trainSet, order = ARIMAOrder)
-    fittedModel = model.fit()
-    modelPredictions = fittedModel.forecast(steps=len(testSet))
-    meanSquaredError = mean_squared_error(modelPredictions, testSet)
+closePriceGroup = closePriceGroup.median()
 
-    return meanSquaredError, fittedModel
+# Split into training and testing sets
+trainSize = int(len(closePriceGroup) * 0.8)
+trainData = closePriceGroup.iloc[:trainSize].values  # Convert to numpy array
+testData = closePriceGroup.iloc[trainSize:].values
 
-#  https://www.youtube.com/watch?v=aZmYr71YiWQ
+# https://people.duke.edu/~rnau/411arim.htm
 
-bestMSE = 999999999999999999  # !!!*** make this inf wtf?
-
-results = []
-for p, d, q in product(p,d,q):
-    ARIMAOrder = (p,d,q)
-
-    meanSquaredError, fittedModel = evaluateARIMAModel(trainingDataSlice["Close"], testDataSlice["Close"], ARIMAOrder)
-
-    results.append((ARIMAOrder, meanSquaredError, fittedModel))
+# ARIMA is split into three sections:
+# AR - autoregression: Lags of the stationarized series in the forecasting equation are called "autoregressive" terms
+# I - integrated: a time series which needs to be differenced to be made stationary is said to be an "integrated" version of a stationary series
+# MA - moving average: lags of the forecast errors are called "moving average" terms
 
 
+# Define ARIMA parameters
+p_range = range(0, 4)  # the number of autoregressive terms
+d_range = range(0, 2)  # the number of nonseasonal differences needed for stationarity
+q_range = range(0, 4)  # the number of lagged forecast errors in the prediction equation.
 
-    if fittedModel: # there are many reasons why a set of parameters will just return None
-        #plt.figure()
-        #plt.plot(timeSlice["Datetime"][:len(trainingDataSlice)], trainingDataSlice["Close"])
-        #plt.plot(timeSlice["Datetime"][int(len(timeSlice)*0.8):], testDataSlice["Close"])
-        #plt.plot(timeSlice["Datetime"][int(len(timeSlice)*0.8):], fittedModel.forecast(steps = len(testDataSlice)), label=f"{ARIMAOrder}")
-        # title
-        # labels
-        #plt.legend()
-        #plt.show()
+def difference_series(series, order=1):
+    # apply differencing to make the series stationary.
+    return np.diff(series, n=order)
 
+def inverse_difference(original, diff_series):
+    # revert differenced series back to original scale
+    return np.cumsum(np.insert(diff_series, 0, original[0]))
 
-        if meanSquaredError < bestMSE:
-            bestMSE = meanSquaredError
+def fit_ar_model(data, p):
+    # fit an Autoregressive (AR) model of order p using least squares
+    X = np.array([data[i-p:i] for i in range(p, len(data))])
+    y = data[p:]
+    if len(X) == 0 or len(y) == 0:
+        return np.zeros(p)  # If not enough data, return zeros
+    coeffs = np.linalg.lstsq(X, y, rcond=None)[0]  # Solve Ax = b
+    return coeffs
 
-print(bestMSE)
+def forecast_ar(coeffs, history, steps):
+    """Forecast using AR model."""
+    predictions = []
+    history = list(history)
+    for _ in range(steps):
+        pred = np.dot(coeffs, history[-len(coeffs):])
+        predictions.append(pred)
+        history.append(pred)
+    return np.array(predictions)
 
-# 109445837.08396368
-# 109445837
+def moving_average(errors, q):
+    # Fit a simple Moving Average (MA) model.
+    if len(errors) < q:
+        return np.zeros(q)
+    coeffs = np.linalg.lstsq(
+        np.array([errors[i-q:i] for i in range(q, len(errors))]),
+        errors[q:],
+        rcond=None
+    )[0]
+    return coeffs
 
-#plt.plot(timeSlice["Datetime"][:len(trainingDataSlice)], trainingDataSlice["Close"])
-#plt.plot(timeSlice["Datetime"][int(len(timeSlice)*0.8):], testDataSlice["Close"])
-#plt.show()
+def forecast_ma(errors, ma_coeffs, steps):
+    # forecast future errors using MA model
+    predicted_errors = []
+    history = list(errors)
+    for _ in range(steps):
+        pred_error = np.dot(ma_coeffs, history[-len(ma_coeffs):]) if len(ma_coeffs) > 0 else 0
+        predicted_errors.append(pred_error)
+        history.append(pred_error)
+    return np.array(predicted_errors)
+
+def evaluate_arima(train, test, p, d, q):
+    # fit and evaluate the ARIMA (p,d,q) model.
+    if d > 0:
+        train_diff = difference_series(train, d)
+    else:
+        train_diff = train.copy()
+
+    # Fit AR and MA models
+    ar_coeffs = fit_ar_model(train_diff, p)
+    errors = train_diff[p:] - forecast_ar(ar_coeffs, train_diff[:p], len(train_diff) - p)
+    ma_coeffs = moving_average(errors, q)
+
+    # Forecasting
+    test_diff = difference_series(test, d) if d > 0 else test.copy()
+    ar_forecast = forecast_ar(ar_coeffs, train_diff, len(test_diff))
+    ma_forecast = forecast_ma(errors, ma_coeffs, len(test_diff))
+    predictions = ar_forecast + ma_forecast
+
+    if d > 0:
+        predictions = inverse_difference(train[-len(predictions)-1:], predictions)
+
+    mse = mean_squared_error(test, predictions)
+    return mse, predictions
+
+# Iterate over parameter grid
+bestMSE = float("inf")
+bestOrder = None
+bestPredictions = None
+
+for p, d, q in product(p_range, d_range, q_range):
+    try:
+        mse, predictions = evaluate_arima(trainData, testData, p, d, q)
+        if mse < bestMSE:
+            bestMSE = mse
+            bestOrder = (p, d, q)
+            bestPredictions = predictions
+    except Exception as e:
+        print(f"ARIMA({p},{d},{q}) failed: {e}")
+
+# Print best model
+print(f"Best ARIMA Order: {bestOrder}, MSE: {bestMSE}")
+
+# Plot results
+plt.figure(figsize=(10, 5))
+plt.plot(closePriceGroup.index[:trainSize], trainData, label="Training Data")
+plt.plot(closePriceGroup.index[trainSize:], testData, label="Testing Data", color="orange")
+
+if bestPredictions is not None:
+    plt.plot(closePriceGroup.index[trainSize:], bestPredictions, label=f"ARIMA{bestOrder}", linestyle="dashed")
+
+plt.title("Bitcoin Daily Close Price Forecast")
+plt.xlabel("Date")
+plt.ylabel("Close Price")
+plt.legend()
+plt.show()
