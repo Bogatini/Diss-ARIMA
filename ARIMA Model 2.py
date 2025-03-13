@@ -25,6 +25,10 @@ print("Path to dataset files:", path)
 
 csvData = pd.read_csv(path + "\\btcusd_1-min_data.csv", header = 0)
 
+# check if any null values (there shouldnt be?)
+#
+print(csvData.drop(columns=["Timestamp"]).isnull().any())
+
 csvData["Datetime"] = pd.to_datetime(csvData["Timestamp"], unit = "s")
 
 timeSlice = csvData[(csvData["Timestamp"] >= startDateUnix) & (csvData["Timestamp"] < endDateUnix)]
